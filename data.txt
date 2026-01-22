@@ -1,0 +1,22 @@
+LangChain is a framework for developing applications powered by large language models.
+It helps with prompt management, chaining calls, memory, and document retrieval.
+LangChain is commonly used for chatbots, RAG systems, and AI agents.
+
+Key Features of LangChain:
+1. Document Loaders: Load documents from various sources like PDFs, text files, web pages
+2. Text Splitters: Break down large documents into manageable chunks
+3. Embeddings: Convert text into vector representations for similarity search
+4. Vector Stores: Store and retrieve document embeddings efficiently
+5. Chains: Combine multiple components to create complex workflows
+6. Memory: Maintain conversation context across interactions
+7. Agents: Create autonomous systems that can use tools and make decisions
+
+Common Use Cases:
+- Question Answering Systems: Build systems that can answer questions from documents
+- Chatbots: Create conversational AI applications
+- Document Summarization: Automatically summarize large documents
+- Content Generation: Generate content based on existing documents
+- Research Assistants: Help users find information from large document collections
+
+LangChain supports various LLM providers including OpenAI, Anthropic, Hugging Face, and local models.
+It also integrates with vector databases like Pinecone, Weaviate, and FAISS for efficient document retrieval.
