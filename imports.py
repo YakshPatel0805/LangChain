@@ -10,3 +10,5 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from langchain_classic.schema import Document
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
+from typing import Literal
