@@ -82,8 +82,8 @@ if __name__ == "__main__":
     sample = """
     Hello Support Team,
 
-    My payment failed twice and my account is locked.
-    Please resolve urgently.
+    I have some issue in my computer system,
+    please help me to figure this out.
 
     Thanks,
     Rahul
@@ -93,12 +93,19 @@ if __name__ == "__main__":
 
 
 
-# OUTPUT
+# OUTPUT: 1
 # {
 #   "cleaned_text": "Hello Support Team, My payment failed twice and my account is locked. Please resolve urgently. Thanks, Rahul",
 #   "intent": "failed_payment_attempts",
 #   "category": "Billing",
 #   "priority": "High"
-#   "category": "Billing",
-#   "priority": "High"
+# }
+
+
+# OUTPUT: 2
+# {
+#   "cleaned_text": "Hello Support Team, I have some issue in my computer system, please help me to figure this out. Thanks, Rahul",
+#   "intent": "help",
+#   "category": "Technical",
+#   "priority": "Medium"
 # }
