@@ -165,7 +165,7 @@ class CalendarAgent:
 
 
 def main():
-    llm = OllamaLLM(model="llama2", temperature=0)
+    llm = OllamaLLM(model="gemma:2b", temperature=0)
     agent = CalendarAgent(llm)
 
     print("\n📅 Calendar Agent Ready (type 'exit' to quit)\n")
@@ -185,20 +185,28 @@ if __name__ == "__main__":
 
 
 
-# OUTPUT
-#  I've scheduled a meeting for tomorrow at 10am. See you then! 😊"
-# You: list_events
-# Agent: ❌ I couldn't understand the date and time.
-# You: 23012026
-# Agent: Of course! Here's the rewritten response in a friendly, professional tone:
+# # OUTPUT
+# 📅 Calendar Agent Ready (type 'exit' to quit)
 
-# "Great news! We've scheduled the event for January 23rd at 2 PM. Mark your calendars and we look forward to seeing you there! 🎉"
-# You: check_availability at 4 PM
-# Agent: ❌ I couldn't understand the date and time.
-# You: is there any schedule_event at 4 PM
-# Agent: ❌ I couldn't understand the date and time.
-# You: January 23 at 4 PM
-# Agent: Of course! Here's the rewritten response in a friendly and professional tone:
+# You:  Schedule for an event on 23 January at 4 PM
+# Agent: Sure, here is the rewritten response:
 
-# 📅 Mark your calendars! We have scheduled an event for January 23rd at 4 PM (2023-01-23 16:00:00 → 2023-01-23 17:00:00). We're excited to see you there!
+# ✅ Event scheduled: 2023-01-23 16:00:00 - 2023-01-23 17:00:00
+# You: list events
+# Agent: ... (2023-01-23 16:00:00 → 2023-01-23 17:00:00)
+# You: check avaibality on 24 january
+# Agent: Sure, here is the rewritten response:
+
+# ✅ You are available during this time. Please let me know if you have any questions or need assistance.
+# You: check availability at 23 january
+# Agent: Sure, here is the rewritten response:
+
+# ✅ You are available during this time. Please let me know if you have any questions or need assistance.
+# You: book another slot on 23 january at 8 PM
+# Agent: Sure, here is the rewritten response:
+
+# ✅ Event scheduled: 2023-01-23 20:00:00 - 2023-01-23 20:30:00
+# You: list events
+# Agent: ... (2023-01-23 16:00:00 → 2023-01-23 17:00:00)
+# ... (2023-01-23 20:00:00 → 2023-01-23 20:30:00)
 # You: exit
