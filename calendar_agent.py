@@ -48,17 +48,17 @@ class BaseAgent:
 class IntentAgent(BaseAgent):
     def run(self, user_input):
         prompt = f"""
-Identify the intent.
-Choose one:
-- schedule_event
-- check_availability
-- list_events
+        Identify the intent.
+        Choose one:
+        - schedule_event
+        - check_availability
+        - list_events
 
-Input:
-{user_input}
+        Input:
+        {user_input}
 
-Respond with ONLY the intent name.
-"""
+        Respond with ONLY the intent name.
+        """
         response = self.llm.invoke(prompt)
         return response.strip().lower()
 
@@ -66,23 +66,23 @@ Respond with ONLY the intent name.
 class TimeAgent(BaseAgent):
     def run(self, user_input):
         prompt = f"""
-Extract event title, start time, and end time.
+        Extract event title, start time, and end time.
 
-Rules:
-- Output ONLY valid JSON
-- Use ISO format: YYYY-MM-DD HH:MM
-- If unsure, return {{}}
+        Rules:
+        - Output ONLY valid JSON
+        - Use ISO format: YYYY-MM-DD HH:MM
+        - If unsure, return {{}}
 
-Input:
-{user_input}
+        Input:
+        {user_input}
 
-Output:
-{{
-  "title": "...",
-  "start": "...",
-  "end": "..."
-}}
-"""
+        Output:
+        {{
+        "title": "...",
+        "start": "...",
+        "end": "..."
+        }}
+        """
         response = self.llm.invoke(prompt)
         return response.strip()
 
@@ -107,10 +107,10 @@ class AvailabilityAgent(BaseAgent):
 class ResponseAgent(BaseAgent):
     def run(self, text):
         prompt = f"""
-Rewrite this response:
+        Rewrite this response:
 
-{text}
-"""
+        {text}
+        """
         response = self.llm.invoke(prompt)
         return response.strip()
 
