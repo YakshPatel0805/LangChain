@@ -81,44 +81,7 @@ def task4_vector_store(chunks, embeddings):
     
     return vectorstore
 
-def task5_prompt_templates():
-    print("\n" + "=" * 50)
-    print("TASK 5: Prompt Templates")
-    print("=" * 50)
-    
-    simple_template = PromptTemplate(
-        input_variables=["topic"],
-        template="Tell me about {topic} in simple terms."
-    )
-    
-    qa_template = PromptTemplate(
-        input_variables=["context", "question"],
-        template="""
-        Based on the following context, answer the question:
-        
-        Context: {context}
-        
-        Question: {question}
-        
-        Answer: """
-    )
-    
-    topic = "artificial intelligence"
-    simple_prompt = simple_template.format(topic=topic)
-    
-    context = "LangChain is a framework for building AI applications with LLMs."
-    question = "What is LangChain used for?"
-    qa_prompt = qa_template.format(context=context, question=question)
-    
-    print("Simple Prompt Template:")
-    print(simple_prompt)
-    
-    print("\nQ&A Prompt Template:")
-    print(qa_prompt)
-    
-    return simple_template, qa_template
-
-def task6_document_search_demo(vectorstore):
+def task5_document_search_demo(vectorstore):
     print("\n" + "=" * 50)
     print("TASK 6: Document Search Demo")
     print("=" * 50)
@@ -138,7 +101,7 @@ def task6_document_search_demo(vectorstore):
         else:
             print("No relevant information found.")
 
-def task7_memory_simulation():
+def task6_memory_simulation():
     print("\n" + "=" * 50)
     print("TASK 7: Conversation Memory Simulation")
     print("=" * 50)
@@ -153,9 +116,10 @@ def task7_memory_simulation():
         })
     
     def get_conversation_context():
+        print()
         context = ""
         for exchange in conversation_history[-3:]:
-            context += f"User: {exchange['user']}\nAI: {exchange['ai']}\n"
+            context += f"User: {exchange['user']}\nAI: {exchange['ai']}\n\n"
         return context
     
     exchanges = [
@@ -166,9 +130,6 @@ def task7_memory_simulation():
     
     for user_msg, ai_msg in exchanges:
         add_to_memory(user_msg, ai_msg)
-        print(f"User: {user_msg}")
-        print(f"AI: {ai_msg}")
-        print()
     
     print("Conversation Context (last 3 exchanges):")
     print(get_conversation_context())
@@ -191,18 +152,11 @@ def main():
         # # Task 4: Vector Store
         # vectorstore = task4_vector_store(chunks, embeddings)
         
-        # # Task 5: Prompt Templates
-        # simple_template, qa_template = task5_prompt_templates()
+        # # Task 5: Document Search
+        # task5_document_search_demo(vectorstore)
         
-        # # Task 6: Document Search
-        # task6_document_search_demo(vectorstore)
-        
-        # # Task 7: Memory Simulation
-        # task7_memory_simulation()
-        
-        # print("\n" + "=" * 50)
-        # print("✅ All LangChain basic tasks completed successfully!")
-        # print("=" * 50)
+        # # Task 6: Memory Simulation
+        # task6_memory_simulation()
         
     except Exception as e:
         print(f"❌ Error occurred: {str(e)}")
