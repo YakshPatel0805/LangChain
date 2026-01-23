@@ -1,10 +1,11 @@
 import os
+import warnings
 from dotenv import load_dotenv
 from operator import itemgetter
 from datetime import datetime
 import requests
 import streamlit as st
-
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, trim_messages
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.chat_history import BaseChatMessageHistory
@@ -12,10 +13,9 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables import RunnableWithMessageHistory, RunnablePassthrough
 
 load_dotenv()
+warnings.filterwarnings("ignore")
 
-# model with Groq
-from langchain_groq import ChatGroq
-
+# Groq model
 model = ChatGroq(
     model="llama-3.1-8b-instant",
     temperature=0.7,
@@ -29,12 +29,14 @@ def get_real_time_context():
     
     try:
         # Add weather data if available
-        weather_response = requests.get('https://wttr.in/?format=j1', timeout=2)
-        if weather_response.status_code == 200:
-            weather_data = weather_response.json()
-            current_weather = weather_data['current_condition'][0]
-            context += f"\n[Current Weather: {current_weather['description']}, Temp: {current_weather['temp_C']}°C]"
-    except:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            weather_response = requests.get('https://wttr.in/?format=j1', timeout=2)
+            if weather_response.status_code == 200:
+                weather_data = weather_response.json()
+                current_weather = weather_data['current_condition'][0]
+                context += f"\n[Current Weather: {current_weather['description']}, Temp: {current_weather['temp_C']}°C]"
+    except Exception:
         pass
     
     return context
@@ -94,6 +96,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Suppress streamlit specific warnings
+import logging
+logging.getLogger('streamlit').setLevel(logging.ERROR)
 
 # Custom CSS for better styling
 st.markdown("""
@@ -293,14 +299,16 @@ if user_input:
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("🤔 Thinking with real-time data..."):
             try:
-                response = chatbot.invoke(
-                    {
-                        "messages": [HumanMessage(content=enhanced_input)],
-                        "language": language,
-                    },
-                    config=config,
-                )
-                ai_response = response.content
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    response = chatbot.invoke(
+                        {
+                            "messages": [HumanMessage(content=enhanced_input)],
+                            "language": language,
+                        },
+                        config=config,
+                    )
+                    ai_response = response.content
             except Exception as e:
                 ai_response = f"❌ Error: {str(e)}\n\n💡 Make sure GROQ_API_KEY is set in .env file"
         
