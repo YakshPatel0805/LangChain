@@ -320,3 +320,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+# To run this file:
+# streamlit run AIChatBot.py
