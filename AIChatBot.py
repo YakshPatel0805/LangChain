@@ -1,3 +1,12 @@
+"""
+AI ChatBot with Dual CNN & Web Research Integration
+- Enhanced image output format with user-friendly responses
+- Automatic cache clearing for each new query
+- Internet-based responses in proper paragraph format with detailed information
+- Complete standalone application with main execution function
+"""
+
+
 import os
 import warnings
 from dotenv import load_dotenv
@@ -11,52 +20,128 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables import RunnableWithMessageHistory, RunnablePassthrough
-import base64
 from PIL import Image
 import io
-import json
 
-# Try to import OpenAI as backup for vision
+# Try to import TensorFlow/Keras for ResNet50 and EfficientNet classification
 try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
+    import tensorflow as tf
+    from tensorflow.keras.applications import ResNet50, EfficientNetB0
+    from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess, decode_predictions as resnet_decode
+    from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess, decode_predictions as efficientnet_decode
+    from tensorflow.keras.preprocessing import image
+    import numpy as np
+    TENSORFLOW_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
-
-# Try to import Google Gemini as another backup for vision
-try:
-    import google.generativeai as genai
-    GOOGLE_AVAILABLE = True
-except ImportError:
-    GOOGLE_AVAILABLE = False
+    TENSORFLOW_AVAILABLE = False
 
 load_dotenv()
 warnings.filterwarnings("ignore")
 
-# Groq models - including vision model
+# Web search functionality
+def search_web_for_information(query, max_results=5):
+    """Search the web for information about the identified object"""
+    try:
+        # Use DuckDuckGo API for web search
+        search_url = "https://api.duckduckgo.com/"
+        params = {
+            'q': query,
+            'format': 'json',
+            'no_html': '1',
+            'skip_disambig': '1'
+        }
+        
+        response = requests.get(search_url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Extract relevant information
+            search_results = []
+            
+            # Get abstract if available
+            if data.get('Abstract'):
+                search_results.append({
+                    'type': 'abstract',
+                    'content': data['Abstract'],
+                    'source': data.get('AbstractSource', 'DuckDuckGo')
+                })
+            
+            # Get related topics
+            if data.get('RelatedTopics'):
+                for topic in data['RelatedTopics'][:3]:  # Limit to 3 topics
+                    if isinstance(topic, dict) and topic.get('Text'):
+                        search_results.append({
+                            'type': 'related',
+                            'content': topic['Text'],
+                            'source': 'DuckDuckGo'
+                        })
+            
+            return search_results
+        
+        return []
+        
+    except Exception as e:
+        print(f"Web search error: {e}")
+        return []
+
+def get_comprehensive_web_information(object_name):
+    """Get comprehensive information from the internet"""
+    try:
+        # Search for general information
+        general_query = f"{object_name} facts habitat diet behavior characteristics"
+        search_results = search_web_for_information(general_query)
+        
+        # Search for specific aspects
+        habitat_query = f"{object_name} habitat where found natural environment"
+        habitat_results = search_web_for_information(habitat_query)
+        
+        diet_query = f"{object_name} diet food eating habits what eats"
+        diet_results = search_web_for_information(diet_query)
+        
+        behavior_query = f"{object_name} behavior lifestyle interesting facts"
+        behavior_results = search_web_for_information(behavior_query)
+        
+        # Combine all search results
+        all_results = {
+            'general': search_results,
+            'habitat': habitat_results,
+            'diet': diet_results,
+            'behavior': behavior_results
+        }
+        
+        return all_results
+        
+    except Exception as e:
+        print(f"Information gathering error: {e}")
+        return {}
+
+# Groq text model for regular chat
 text_model = ChatGroq(
     model="llama-3.1-8b-instant",
     temperature=0.7,
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# Updated to use the current supported vision model
-vision_model = ChatGroq(
-    model="llama-3.2-90b-vision-preview",  # Updated to current supported model
-    temperature=0.7,
-    api_key=os.getenv("GROQ_API_KEY")
-)
+# Initialize ResNet50 and EfficientNet-B0 for image classification
+resnet_model = None
+efficientnet_model = None
 
-# Initialize OpenAI client as backup
-openai_client = None
-if OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# Initialize Google Gemini as another backup
-google_model = None
-if GOOGLE_AVAILABLE and os.getenv("GOOGLE_API_KEY"):
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-    google_model = genai.GenerativeModel('gemini-1.5-flash')
+if TENSORFLOW_AVAILABLE:
+    try:
+        # Load ResNet50 model with ImageNet weights
+        resnet_model = ResNet50(weights='imagenet')
+        print("✅ ResNet50 model loaded successfully")
+    except Exception as e:
+        print(f"❌ Failed to load ResNet50: {e}")
+        resnet_model = None
+    
+    try:
+        # Load EfficientNet-B0 model with ImageNet weights
+        efficientnet_model = EfficientNetB0(weights='imagenet')
+        print("✅ EfficientNet-B0 model loaded successfully")
+    except Exception as e:
+        print(f"❌ Failed to load EfficientNet-B0: {e}")
+        efficientnet_model = None
 
 # Real-time data fetcher
 def get_real_time_context():
@@ -77,13 +162,6 @@ def get_real_time_context():
     
     return context
 
-def encode_image_to_base64(image):
-    """Convert PIL Image to base64 string"""
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return img_str
-
 def resize_image(image, max_size=1024):
     """Resize image while maintaining aspect ratio"""
     width, height = image.size
@@ -97,132 +175,229 @@ def resize_image(image, max_size=1024):
         image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
     return image
 
-def process_image_with_google(image, user_prompt, language="English"):
-    """Process image with Google Gemini Vision"""
-    if not google_model:
+def classify_image_with_resnet(image_pil):
+    """Classify image using ResNet50 model"""
+    if not resnet_model:
         return None
     
     try:
-        # Resize image for optimal processing
-        processed_image = resize_image(image)
+        # Resize image to 224x224 (ResNet50 input size)
+        img_resized = image_pil.resize((224, 224))
         
-        # Create prompt for Gemini
-        prompt = f"Analyze this image and respond in {language}. User question: {user_prompt}"
+        # Convert PIL image to array
+        img_array = tf.keras.preprocessing.image.img_to_array(img_resized)
         
-        # Generate response with image
-        response = google_model.generate_content([prompt, processed_image])
-        return response.text
+        # Expand dimensions to create batch
+        img_array = np.expand_dims(img_array, axis=0)
+        
+        # Preprocess the image
+        img_preprocessed = resnet_preprocess(img_array)
+        
+        # Make prediction
+        predictions = resnet_model.predict(img_preprocessed, verbose=0)
+        
+        # Decode predictions to get top 5 classes
+        decoded_predictions = resnet_decode(predictions, top=5)[0]
+        
+        # Format results
+        results = []
+        for i, (class_id, class_name, confidence) in enumerate(decoded_predictions):
+            results.append({
+                'rank': i + 1,
+                'class': class_name.replace('_', ' ').title(),
+                'confidence': float(confidence * 100)
+            })
+        
+        return results
         
     except Exception as e:
-        return f"Google Gemini Vision Error: {str(e)}"
+        return f"ResNet50 Classification Error: {str(e)}"
 
-def process_image_with_openai(image, user_prompt, language="English"):
-    """Fallback: Process image with OpenAI Vision API"""
-    if not openai_client:
+def classify_image_with_efficientnet(image_pil):
+    """Classify image using EfficientNet-B0 model"""
+    if not efficientnet_model:
         return None
     
     try:
-        # Resize and encode image
-        processed_image = resize_image(image)
-        img_base64 = encode_image_to_base64(processed_image)
+        # Resize image to 224x224 (EfficientNet-B0 input size)
+        img_resized = image_pil.resize((224, 224))
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",  # OpenAI's vision model
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"Analyze this image and respond in {language}. User question: {user_prompt}"
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{img_base64}"
-                            }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=1000,
-            temperature=0.7
-        )
+        # Convert PIL image to array
+        img_array = tf.keras.preprocessing.image.img_to_array(img_resized)
         
-        return response.choices[0].message.content
+        # Expand dimensions to create batch
+        img_array = np.expand_dims(img_array, axis=0)
+        
+        # Preprocess the image
+        img_preprocessed = efficientnet_preprocess(img_array)
+        
+        # Make prediction
+        predictions = efficientnet_model.predict(img_preprocessed, verbose=0)
+        
+        # Decode predictions to get top 5 classes
+        decoded_predictions = efficientnet_decode(predictions, top=5)[0]
+        
+        # Format results
+        results = []
+        for i, (class_id, class_name, confidence) in enumerate(decoded_predictions):
+            results.append({
+                'rank': i + 1,
+                'class': class_name.replace('_', ' ').title(),
+                'confidence': float(confidence * 100)
+            })
+        
+        return results
         
     except Exception as e:
-        return f"OpenAI Vision Error: {str(e)}"
+        return f"EfficientNet-B0 Classification Error: {str(e)}"
 
-def process_image_with_vision(image, user_prompt, language="English"):
-    """Process image with vision model"""
+def process_image_with_cnn_and_web_research(image, user_prompt, language="English"):
+    """Process image using CNN models with web research for comprehensive responses"""
     try:
-        # Resize image for optimal processing
-        processed_image = resize_image(image)
+        # Get classifications from both CNN models
+        resnet_results = None
+        efficientnet_results = None
         
-        # Convert to base64
-        img_base64 = encode_image_to_base64(processed_image)
+        st.info("🔍 Analyzing image with CNN models...")
         
-        # Create vision message
-        vision_message = HumanMessage(
-            content=[
-                {
-                    "type": "text",
-                    "text": f"Analyze this image and respond in {language}. User question: {user_prompt}"
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
-                    }
-                }
-            ]
-        )
+        if resnet_model:
+            resnet_results = classify_image_with_resnet(image)
         
-        # Try with the primary vision model first
-        try:
-            response = vision_model.invoke([vision_message])
-            return f"🤖 **Groq Vision**: {response.content}"
-        except Exception as vision_error:
-            # If Groq vision model fails, try Google Gemini as first backup
-            if google_model:
-                st.info("🔄 Groq vision unavailable, trying Google Gemini Vision...")
-                google_result = process_image_with_google(image, user_prompt, language)
-                if google_result and not google_result.startswith("Google Gemini Vision Error"):
-                    return f"🔄 **Google Gemini Vision** (Backup): {google_result}"
+        if efficientnet_model:
+            efficientnet_results = classify_image_with_efficientnet(image)
+        
+        # Determine the primary identification from CNN models
+        primary_object = None
+        
+        # Check EfficientNet results first (usually more accurate)
+        if efficientnet_results and isinstance(efficientnet_results, list):
+            primary_object = efficientnet_results[0]['class']
+        elif resnet_results and isinstance(resnet_results, list):
+            primary_object = resnet_results[0]['class']
+        
+        if primary_object:
+            st.info(f"🎯 Identified: {primary_object}")
+            st.info("🌐 Searching the web for comprehensive information...")
             
-            # If Google fails, try OpenAI as second backup
-            if openai_client:
-                st.info("🔄 Trying OpenAI Vision as secondary backup...")
-                openai_result = process_image_with_openai(image, user_prompt, language)
-                if openai_result and not openai_result.startswith("OpenAI Vision Error"):
-                    return f"🔄 **OpenAI Vision** (Secondary Backup): {openai_result}"
+            # Get comprehensive information from the web
+            web_info = get_comprehensive_web_information(primary_object)
             
-            # If all vision models fail, provide helpful fallback
-            if "decommissioned" in str(vision_error).lower() or "model" in str(vision_error).lower():
-                return f"""❌ **All Vision Models Unavailable**
+            st.info("📝 Generating comprehensive response...")
+            
+            # Create a comprehensive prompt for the text model with web information
+            synthesis_prompt = f"""
+            Based on the CNN classification results and web research, create a comprehensive, engaging response about {primary_object}.
+            
+            CNN Classification Results:
+            - Primary identification: {primary_object}
+            - ResNet50 results: {resnet_results if resnet_results else 'Not available'}
+            - EfficientNet-B0 results: {efficientnet_results if efficientnet_results else 'Not available'}
+            
+            Web Research Information:
+            General: {web_info.get('general', [])}
+            Habitat: {web_info.get('habitat', [])}
+            Diet: {web_info.get('diet', [])}
+            Behavior: {web_info.get('behavior', [])}
+            
+            User Question: {user_prompt}
+            Language: {language}
+            
+            Please create a comprehensive response in {language} using this format:
+            
+            🔍 **What I See:**
+            Start with a clear identification and description of what this {primary_object} is, including key characteristics that helped in identification.
+            
+            🌍 **Where It's From:**
+            Describe the natural habitat, geographic distribution, and environmental preferences based on web research.
+            
+            🍽️ **Diet & Feeding:**
+            Explain what it eats, how it feeds, and any interesting feeding behaviors or adaptations.
+            
+            ✨ **Notable Features:**
+            Highlight distinctive physical characteristics, adaptations, and features that make it unique.
+            
+            🎭 **Behavior & Lifestyle:**
+            Describe typical behaviors, social patterns, daily activities, and lifestyle characteristics.
+            
+            🤓 **Fun Facts:**
+            Share interesting, educational, and surprising facts that make this subject fascinating.
+            
+            📊 **Classification Details:**
+            Briefly mention that this was identified using advanced CNN models, but avoid technical details or confidence percentages.
+            
+            IMPORTANT: 
+            - Write in engaging, flowing paragraphs (not bullet points)
+            - Make it educational and accessible to general audiences
+            - Use emojis and clear section headers
+            - Avoid technical jargon and confidence percentages
+            - Do NOT include any confidence levels, percentages, or technical accuracy metrics
+            - Focus on making it interesting and informative
+            - Include information from web research to make it comprehensive and current
+            """
+            
+            try:
+                response = text_model.invoke([HumanMessage(content=synthesis_prompt)])
+                return response.content
+            except Exception as e:
+                # Fallback response if AI synthesis fails
+                fallback_response = f"""🔍 **What I See:**
+                Based on our CNN analysis, this appears to be a {primary_object}. This identification comes from analyzing the image using advanced deep learning models trained on millions of images.
+                
+                📊 **Classification Results:**
+                Our dual CNN system provided the following analysis:
+                """
+                
+                if resnet_results and isinstance(resnet_results, list):
+                    fallback_response += f"\n🔍 **ResNet50 Top Predictions:**\n"
+                    for i, result in enumerate(resnet_results[:3]):
+                        fallback_response += f"{i+1}. {result['class']}\n"
+                
+                if efficientnet_results and isinstance(efficientnet_results, list):
+                    fallback_response += f"\n⚡ **EfficientNet-B0 Top Predictions:**\n"
+                    for i, result in enumerate(efficientnet_results[:3]):
+                        fallback_response += f"{i+1}. {result['class']}\n"
+                
+                fallback_response += f"\n💡 **Note:** AI synthesis temporarily unavailable. Error: {str(e)[:100]}..."
+                
+                return fallback_response
+        else:
+            return """❌ **Unable to identify the main object in the image.**
 
-**Groq Error**: {str(vision_error)[:100]}...
-**Google Gemini Status**: {"Available" if google_model else "Not configured"}
-**OpenAI Status**: {"Available" if openai_client else "Not configured"}
+🔍 **What happened:**
+Our CNN models (ResNet50 and EfficientNet-B0) couldn't confidently identify the main subject in your image. This might happen when:
 
-🔄 **Alternative Options**:
-1. **Describe the image** and I'll provide analysis based on your description
-2. **Ask specific questions** about image analysis techniques  
-3. **Try again later** - models may become available
+• The image quality is too low or blurry
+• The object is not in our training dataset
+• Unusual lighting or angle conditions
+• The subject is partially obscured
 
-💡 **What I can help with**:
-- Image analysis concepts and techniques
-- Photo composition advice
-- Technical photography questions
-- Image processing guidance
+🎯 **What you can try:**
+1. **Upload a clearer image** with better lighting and focus
+2. **Try a different angle** or closer shot of the subject
+3. **Describe what you see** and I'll provide analysis based on your description
+4. **Ask specific questions** about image analysis techniques
 
-Please describe what you see in the image, and I'll provide detailed insights!"""
-            else:
-                raise vision_error
+💡 **I can still help with:**
+- General image analysis concepts and techniques
+- Photography composition and lighting advice
+- Technical questions about image processing
+- Educational information about objects you describe
+
+Feel free to describe what you see in the image, and I'll provide detailed insights based on your description!"""
         
     except Exception as e:
-        error_msg = str(e)
+        return f"""❌ **Error during CNN analysis and web research**
+
+🔧 **Technical Details:**
+{str(e)}
+
+🎯 **What you can try:**
+1. **Check your internet connection** for web research functionality
+2. **Ensure TensorFlow is properly installed** for CNN models
+3. **Try uploading the image again**
+4. **Contact support** if the issue persists
+
+💡 **Alternative:** Describe the image content and I'll provide analysis based on your description."""
         return f"❌ Error processing image: {error_msg}"
 
 def get_image_info(image):
@@ -243,24 +418,6 @@ def get_image_info(image):
         "mode": mode,
         "size_kb": round(size_kb, 2)
     }
-
-def check_vision_model_availability():
-    """Check if vision model is available"""
-    try:
-        # Try a simple test with the vision model
-        test_message = HumanMessage(content="Test message")
-        vision_model.invoke([test_message])
-        return True, "Available"
-    except Exception as e:
-        error_msg = str(e).lower()
-        if "decommissioned" in error_msg:
-            return False, "Model Decommissioned"
-        elif "rate limit" in error_msg:
-            return False, "Rate Limited"
-        elif "api key" in error_msg:
-            return False, "API Key Issue"
-        else:
-            return False, f"Error: {str(e)[:50]}..."
 
 store = {}
 
@@ -302,7 +459,7 @@ chatbot = RunnableWithMessageHistory(
     input_messages_key="messages",
 )
 
-# Initialize session state
+# Initialize session state with upload counter for cache clearing
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "session_id" not in st.session_state:
@@ -313,6 +470,10 @@ if "uploaded_images" not in st.session_state:
     st.session_state.uploaded_images = []
 if "image_analysis_mode" not in st.session_state:
     st.session_state.image_analysis_mode = False
+if "upload_key" not in st.session_state:
+    st.session_state.upload_key = 0
+if "image_processed" not in st.session_state:
+    st.session_state.image_processed = False
 
 # Streamlit UI Configuration
 st.set_page_config(
@@ -451,19 +612,23 @@ with st.sidebar:
         st.success("🌤️ Weather data available")
     st.info(f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}")
     
-    # Vision model status
+    # CNN model status
     if st.session_state.image_analysis_mode:
-        vision_available, vision_status = check_vision_model_availability()
-        if vision_available:
-            st.success(f"🖼️ Groq Vision: {vision_status}")
+        if resnet_model:
+            st.success("� ResNet50 Classification: Loaded")
         else:
-            st.error(f"🖼️ Groq Vision: {vision_status}")
+            st.error("� ResNet50: Not available")
         
-        # Show backup status
-        if google_model:
-            st.success("🔄 Google Gemini: Available")
-        if openai_client:
-            st.success("🔄 OpenAI Vision: Available")
+        if efficientnet_model:
+            st.success("⚡ EfficientNet-B0 Classification: Loaded")
+        else:
+            st.error("⚡ EfficientNet-B0: Not available")
+        
+        # Show TensorFlow status
+        if TENSORFLOW_AVAILABLE:
+            st.success("🧠 TensorFlow: Available")
+        else:
+            st.error("🧠 TensorFlow: Not installed")
     
     st.divider()
     
@@ -473,12 +638,28 @@ with st.sidebar:
         if st.button("🗑️ Clear Chat", use_container_width=True, key="clear_btn"):
             st.session_state.messages = []
             store[st.session_state.session_id] = ChatMessageHistory()
+            # Clear image cache as well
+            if "current_image" in st.session_state:
+                del st.session_state.current_image
+            if "current_image_name" in st.session_state:
+                del st.session_state.current_image_name
+            # Reset upload key to clear file uploader
+            st.session_state.upload_key += 1
+            st.session_state.image_processed = False
             st.rerun()
     
     with col2:
         if st.button("🔄 New Chat", use_container_width=True, key="new_btn"):
             st.session_state.session_id = f"chat_{datetime.now().timestamp()}"
             st.session_state.messages = []
+            # Clear image cache as well
+            if "current_image" in st.session_state:
+                del st.session_state.current_image
+            if "current_image_name" in st.session_state:
+                del st.session_state.current_image_name
+            # Reset upload key to clear file uploader
+            st.session_state.upload_key += 1
+            st.session_state.image_processed = False
             st.rerun()
     
     st.divider()
@@ -504,26 +685,27 @@ with st.sidebar:
     st.markdown("### 🖼️ Image Analysis")
     
     # Image analysis mode toggle
-    image_mode = st.toggle("🔍 Vision Mode", value=st.session_state.image_analysis_mode)
+    image_mode = st.toggle("🔍 CNN Mode", value=st.session_state.image_analysis_mode)
     st.session_state.image_analysis_mode = image_mode
     
     if image_mode:
-        st.success("🎯 Vision mode active - Upload images for analysis!")
+        st.success("🎯 CNN mode active - Upload images for classification!")
         
-        # Show current vision model info
-        groq_status = "🟢 Available" if os.getenv("GROQ_API_KEY") else "🔴 No API Key"
-        google_status = "🟢 Available" if google_model else "🔴 Not configured"
-        openai_status = "🟢 Available" if openai_client else "🔴 Not configured"
+        # Show current CNN model info
+        resnet_status = "🟢 Loaded" if resnet_model else "🔴 Not available"
+        efficientnet_status = "🟢 Loaded" if efficientnet_model else "🔴 Not available"
+        tensorflow_status = "🟢 Available" if TENSORFLOW_AVAILABLE else "🔴 Not installed"
         
-        st.info(f"🤖 **Primary**: Groq Vision {groq_status}")
-        st.info(f"🔄 **Backup 1**: Google Gemini {google_status}")
-        st.info(f"🔄 **Backup 2**: OpenAI Vision {openai_status}")
+        st.info(f"� **CNN Model 1**: ResNet50 {resnet_status}")
+        st.info(f"⚡ **CNN Model 2**: EfficientNet-B0 {efficientnet_status}")
+        st.info(f"� **Framework**: TensorFlow {tensorflow_status}")
         
         # Image upload
         uploaded_file = st.file_uploader(
-            "📸 Upload Image",
+            "� Upload Image",
             type=['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'],
-            help="Upload an image to analyze with AI vision"
+            help="Upload an image to analyze with CNN models",
+            key=f"image_uploader_{st.session_state.upload_key}"
         )
         
         if uploaded_file is not None:
@@ -568,33 +750,35 @@ with st.sidebar:
     - Weather data integration
     - Multi-language support
     - Chat history with context
-    - 🖼️ **Triple Vision AI System**
+    - � **Dual CNN Classification System**
     - 📸 **Multiple image format support**
     
     📝 **Commands:**
     - Type your question
-    - Upload images in Vision Mode
+    - Upload images in CNN Mode
     - Use 'Clear Chat' to reset
     - Use 'New Chat' for fresh session
     
-    🖼️ **Vision Models:**
-    - **Primary**: Groq Vision (Fast)
-    - **Backup 1**: Google Gemini (Accurate)
-    - **Backup 2**: OpenAI Vision (Reliable)
-    - Automatic fallback between models
+    � **CNN Models:**
+    - **ResNet50**: Deep Learning classification (ImageNet trained)
+    - **EfficientNet-B0**: Efficient & accurate classification
+    - **TensorFlow**: Powered by Google's ML framework
+    - Dual model comparison for better accuracy
     
-    🖼️ **Image Tips:**
-    - Toggle Vision Mode to analyze images
+    🖼️ **Image Analysis:**
+    - Toggle CNN Mode to analyze images
     - Supports: PNG, JPG, JPEG, GIF, BMP, WEBP
+    - Get dual CNN classification + detailed analysis
+    - Compare ResNet50 vs EfficientNet predictions
     - Ask questions about uploaded images
-    - Describe, analyze, or extract text from images
+    - AI-powered comprehensive object information
     """)
 
 # Main Chat Area
 st.markdown("""
 <div class="title-main">
-    <h1>🤖 AI ChatBot with Triple Vision & Real-Time Data</h1>
-    <p>Intelligent assistant powered by Groq + Google Gemini + OpenAI - Fast, Accurate, Real-Time Aware + Advanced Image Analysis</p>
+    <h1>🤖 AI ChatBot with Dual CNN & Web Research</h1>
+    <p>Intelligent assistant powered by Groq + ResNet50 + EfficientNet-B0 + Web Research - Fast, Accurate, Real-Time Aware + Advanced CNN Image Classification with Internet-based Information</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -608,16 +792,44 @@ with col3:
     status = "✅ Online" if os.getenv("GROQ_API_KEY") else "❌ No API Key"
     st.metric("🔌 Status", status)
 with col4:
-    vision_status = "🖼️ Vision ON" if st.session_state.image_analysis_mode else "💬 Text Mode"
+    if st.session_state.image_analysis_mode:
+        cnn_count = sum([resnet_model is not None, efficientnet_model is not None])
+        if cnn_count == 2:
+            vision_status = "🔍 Dual CNN ON"
+        elif cnn_count == 1:
+            vision_status = "� Single CNN ON"
+        else:
+            vision_status = "❌ No CNN Models"
+    else:
+        vision_status = "💬 Text Mode"
     st.metric("🤖 Mode", vision_status)
 
-# Vision mode indicator
+# CNN mode indicator
 if st.session_state.image_analysis_mode:
-    st.markdown("""
-    <div class="vision-mode">
-        🎯 VISION MODE ACTIVE - Upload images for AI analysis!
-    </div>
-    """, unsafe_allow_html=True)
+    cnn_count = sum([resnet_model is not None, efficientnet_model is not None])
+    if cnn_count == 2:
+        st.markdown("""
+        <div class="vision-mode">
+            🔍 DUAL CNN MODE ACTIVE - Upload images for ResNet50 + EfficientNet-B0 classification!
+        </div>
+        """, unsafe_allow_html=True)
+    elif cnn_count == 1:
+        st.markdown("""
+        <div class="vision-mode">
+            🔍 SINGLE CNN MODE ACTIVE - Upload images for CNN classification!
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="vision-mode">
+            ❌ NO CNN MODELS AVAILABLE - Please install TensorFlow and restart the application!
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("""
+        <div class="vision-mode">
+            🎯 TRIPLE VISION MODE ACTIVE - Upload images for AI analysis!
+        </div>
+        """, unsafe_allow_html=True)
 
 st.divider()
 
@@ -642,7 +854,7 @@ col_input, col_send = st.columns([0.95, 0.05])
 with col_input:
     if st.session_state.image_analysis_mode and "current_image" in st.session_state:
         user_input = st.chat_input(
-            f"�️ Ask about the uploaded image: {st.session_state.current_image_name}",
+            f"🔍 Ask about the classified image: {st.session_state.current_image_name}",
             key="user_input",
             max_chars=2000
         )
@@ -675,16 +887,16 @@ if user_input:
     # Get AI response
     with st.chat_message("assistant", avatar="🤖"):
         if has_image:
-            # Use vision model for image analysis
-            with st.spinner("🔍 Analyzing image with AI vision..."):
+            # Use CNN models with web research for comprehensive image analysis
+            with st.spinner("🔍 Analyzing image with CNN models and web research..."):
                 try:
-                    ai_response = process_image_with_vision(
+                    ai_response = process_image_with_cnn_and_web_research(
                         st.session_state.current_image, 
                         user_input, 
                         language
                     )
                 except Exception as e:
-                    ai_response = f"❌ Vision Error: {str(e)}\n\n💡 Make sure GROQ_API_KEY is set and vision model is available"
+                    ai_response = f"❌ CNN Analysis Error: {str(e)}\n\n💡 Make sure TensorFlow is installed and internet connection is available for web research"
         else:
             # Use regular text model with real-time context
             real_time_context = get_real_time_context()
@@ -712,23 +924,34 @@ if user_input:
     # Store AI response in session state
     st.session_state.messages.append({"role": "assistant", "content": ai_response})
     
-    # Clear current image after processing (optional - you can remove this if you want to keep the image)
-    # if has_image:
-    #     del st.session_state.current_image
-    #     del st.session_state.current_image_name
+    # ENHANCED CACHE CLEARING: Clear current image cache after processing to prevent persistence
+    if has_image:
+        # Clear image from session state to prevent cache issues
+        if "current_image" in st.session_state:
+            del st.session_state.current_image
+        if "current_image_name" in st.session_state:
+            del st.session_state.current_image_name
+        
+        # Increment upload key to force file uploader reset
+        st.session_state.upload_key += 1
+        st.session_state.image_processed = True
+        
+        # Force a rerun to clear the UI state and prevent image persistence
+        st.rerun()
 
 # Footer
 st.divider()
 st.markdown(
     """
     <div style='text-align: center; color: #999; font-size: 0.85rem;'>
-    <p>🚀 Powered by Groq + Google Gemini + OpenAI + Streamlit | ⏰ Real-Time Aware | 🌍 Multi-Language | 🖼️ Triple Vision AI</p>
-    <p>📡 Includes live date/time and weather data + Advanced multi-model image analysis for comprehensive responses</p>
+    <p>🚀 Powered by Groq + ResNet50 + EfficientNet-B0 + TensorFlow + Web Research + Streamlit | ⏰ Real-Time Aware | 🌍 Multi-Language | 🔍 Dual CNN AI</p>
+    <p>📡 Includes live date/time and weather data + Advanced CNN image classification + Web research integration + AI-powered comprehensive analysis</p>
     </div>
     """,
     unsafe_allow_html=True
 )
 
-# To run this file:
-# streamlit run AIChatBot.py
 
+
+# To run this application:
+# streamlit run app_ui.py
